@@ -245,8 +245,8 @@ function exportCsv(){
 </script>
 <script type="module">
 import {initializeApp} from "https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js";
-import {getAuth,onAuthStateChanged,createUserWithEmailAndPassword,signInWithEmailAndPassword,signOut,sendPasswordResetEmail,updatePassword,reauthenticateWithCredential,EmailAuthProvider,updateProfile} from "https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js";
-import {getFirestore,doc,getDoc,setDoc} from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
+import {getAuth,onAuthStateChanged,createUserWithEmailAndPassword,signInWithEmailAndPassword,signOut,sendPasswordResetEmail,updatePassword,reauthenticateWithCredential,EmailAuthProvider,updateProfile,sendEmailVerification,deleteUser} from "https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js";
+import {getFirestore,doc,getDoc,setDoc,deleteDoc} from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
 
 var app=initializeApp({
   apiKey:"AIzaSyDOWpk9NAU90yZIiRJg5kCVVTMsU1YrZ-Q",
@@ -288,12 +288,12 @@ window.showAuth=function(mode,msg,ok){
   if(mode==='login'){
     h+='<h2 style="margin-top:0">Log masuk</h2>'+field('a-email','E-mel','email','email')+field('a-pass','Kata laluan','password','current-password',"doAuth('login')")+
       '<button class="primary" onclick="doAuth(\'login\')">Log masuk</button><div id="a-msg" class="msg" role="status"></div>'+
-      '<div class="links"><button class="link" onclick="showAuth(\'forgot\')">Lupa kata laluan</button><button class="link" onclick="showAuth(\'lupauser\')">Lupa username</button><button class="link" onclick="showAuth(\'lupaemel\')">Lupa e-mel</button></div>'+
+      '<div class="links"><button class="link" onclick="showAuth(\'forgot\')">Lupa kata laluan</button><button class="link" onclick="showAuth(\'lupauser\')">Lupa username</button><button class="link" onclick="showAuth(\'lupaemel\')">Lupa e-mel</button><button class="link" onclick="showAuth(\'privasi\')">Polisi Privasi</button></div>'+
       '<button class="ghost" style="width:100%;margin-top:12px" onclick="showAuth(\'register\')">Daftar akaun baharu</button>';
   }else if(mode==='register'){
     h+='<h2 style="margin-top:0">Daftar akaun</h2>'+field('a-user','Username (3-20 huruf, nombor atau _)','text','username')+field('a-email','E-mel','email','email')+
       field('a-pass','Kata laluan (sekurang-kurangnya 8 aksara)','password','new-password')+field('a-pass2','Ulang kata laluan','password','new-password',"doAuth('register')")+
-      '<button class="primary" onclick="doAuth(\'register\')">Daftar</button><div id="a-msg" class="msg" role="status"></div>'+back();
+      '<label style="display:flex;gap:8px;align-items:flex-start;margin:4px 0;color:var(--ink)"><input id="a-ok" type="checkbox" style="width:20px;height:20px;min-height:0;margin-top:2px;accent-color:var(--accent)"><span>Saya setuju dengan Polisi Privasi</span></label><details style="margin-bottom:8px"><summary class="m" style="cursor:pointer">Baca Polisi Privasi</summary>'+policy()+'</details>'+'<button class="primary" onclick="doAuth(\'register\')">Daftar</button><div id="a-msg" class="msg" role="status"></div>'+back();
   }else if(mode==='forgot'){
     h+='<h2 style="margin-top:0">Lupa kata laluan</h2><div class="m" style="margin-bottom:10px">Masukkan e-mel akaun anda. Kami hantar pautan untuk tetapkan kata laluan baharu.</div>'+
       field('a-email','E-mel','email','email',"doAuth('forgot')")+'<button class="primary" onclick="doAuth(\'forgot\')">Hantar pautan</button><div id="a-msg" class="msg" role="status"></div>'+back();
@@ -301,6 +301,13 @@ window.showAuth=function(mode,msg,ok){
     h+='<h2 style="margin-top:0">Lupa username</h2><div class="m">Log masuk dengan e-mel dan kata laluan anda. Username dipaparkan di penjuru atas app dan dalam bahagian Akaun. Kalau kata laluan juga terlupa, guna Lupa kata laluan dahulu.</div>'+back();
   }else if(mode==='lupaemel'){
     h+='<h2 style="margin-top:0">Lupa e-mel</h2><div class="m">E-mel tidak boleh dicari semula daripada app ini. Cuba guna Lupa kata laluan dengan setiap e-mel yang biasa anda guna. Pautan hanya sampai jika e-mel itu berdaftar. Jika anda pemilik app, senarai e-mel ada di Firebase Console, bahagian Authentication.</div>'+back();
+  }else if(mode==='privasi'){
+    h+='<h2 style="margin-top:0">Polisi Privasi</h2>'+policy()+back();
+  }else if(mode==='verify'){
+    var vu=auth.currentUser;
+    h+='<h2 style="margin-top:0">Sahkan e-mel anda</h2><div class="m" style="margin-bottom:12px">Kami telah hantar pautan pengesahan ke <b>'+esc(vu?vu.email:'')+'</b>. Tekan pautan itu, kemudian tekan butang di bawah. Semak folder spam jika tidak jumpa.</div>'+
+      '<button class="primary" onclick="doVerified()">Saya dah sahkan</button><button class="ghost" style="width:100%;margin-top:10px" onclick="doResend()">Hantar semula e-mel</button><div id="a-msg" class="msg" role="status"></div>'+
+      '<button class="ghost" style="width:100%;margin-top:12px" onclick="doLogout()">Log keluar</button>';
   }else if(mode==='error'){
     h+='<h2 style="margin-top:0">Data gagal dimuatkan</h2><div class="m">Semak sambungan internet. Data anda tidak diubah.</div><button class="primary" onclick="location.reload()">Cuba lagi</button><button class="ghost" style="width:100%;margin-top:12px" onclick="doLogout()">Log keluar</button>';
   }
@@ -321,9 +328,10 @@ window.doAuth=async function(mode){
       if(!em){note('Isi e-mel.');return}
       if(pw.length<8){note('Kata laluan mesti sekurang-kurangnya 8 aksara.');return}
       if(pw!==$('a-pass2').value){note('Kata laluan tidak sama.');return}
+      if(!$('a-ok').checked){note('Sila tandakan persetujuan dengan Polisi Privasi.');return}
       note('Sedang mendaftar...',true);
       var c=await createUserWithEmailAndPassword(auth,em,pw);
-      await updateProfile(c.user,{displayName:un});setWho();
+      await updateProfile(c.user,{displayName:un});setWho();try{await sendEmailVerification(c.user)}catch(e){}
     }else if(mode==='forgot'){
       if(!em){note('Isi e-mel.');return}
       try{await sendPasswordResetEmail(auth,em)}catch(e){if(e.code!=='auth/user-not-found')throw e}
@@ -333,6 +341,44 @@ window.doAuth=async function(mode){
 };
 
 window.doLogout=function(){signOut(auth).catch(function(){})};
+
+var CONTACT='';
+function policy(){
+  return '<div class="m" style="line-height:1.65">'+
+  '<p style="margin-top:0"><b>Data yang dikumpul.</b> Username, e-mel, kata laluan, serta rekod servis, hutang, belanja dan tugasan yang anda masukkan.</p>'+
+  '<p><b>Tujuan.</b> Data digunakan hanya untuk menjalankan app ini: log masuk dan menyimpan rekod anda.</p>'+
+  '<p><b>Penyimpanan.</b> Data disimpan oleh Google Firebase di pelayar Singapura. Kata laluan disimpan dalam bentuk hash oleh Firebase Authentication, dan tidak boleh dibaca oleh sesiapa.</p>'+
+  '<p><b>Akses.</b> Anda sahaja boleh membaca rekod anda melalui app. Pemilik app mempunyai akses teknikal ke pangkalan data dan hanya menggunakannya untuk penyelenggaraan dan sokongan.</p>'+
+  '<p><b>Perkongsian.</b> Data anda tidak dijual dan tidak dikongsi dengan pihak lain, selain Google sebagai penyedia perkhidmatan penyimpanan.</p>'+
+  '<p><b>Pemadaman.</b> Anda boleh memadam akaun dalam bahagian Akaun. Akaun dan semua rekod anda akan dipadam kekal.</p>'+
+  '<p><b>Peranti.</b> Pelayar anda menyimpan sesi log masuk supaya anda tidak perlu log masuk setiap kali.</p>'+
+  (CONTACT?'<p><b>Hubungi.</b> '+esc(CONTACT)+'</p>':'')+
+  '<p style="margin-bottom:0">Dikemas kini: 11 November 2026.</p></div>';
+}
+window.doResend=async function(){try{await sendEmailVerification(auth.currentUser);note('E-mel pengesahan dihantar. Semak juga folder spam.',true)}catch(e){note(emsg(e))}};
+window.doVerified=async function(){
+  var u=auth.currentUser;
+  try{
+    await u.reload();
+    if(!u.emailVerified){note('E-mel belum disahkan. Tekan pautan dalam e-mel dahulu.');return}
+    await u.getIdToken(true);window.enterApp(u);
+  }catch(e){note(emsg(e))}
+};
+window.doDelete=async function(b){
+  var m=$('x-msg'),pw=$('x-pw').value,u=auth.currentUser;
+  function say(t){m.textContent=t;m.className='msg err'}
+  if(!pw){say('Masukkan kata laluan.');return}
+  if(!b.classList.contains('sure')){
+    b.classList.add('sure');b.textContent='Pasti? Tekan sekali lagi untuk padam kekal';
+    setTimeout(function(){if(b.isConnected){b.classList.remove('sure');b.textContent='Padam akaun saya'}},5000);return;
+  }
+  try{
+    await reauthenticateWithCredential(u,EmailAuthProvider.credential(u.email,pw));
+    clearTimeout(timer);loaded=false;
+    await deleteDoc(dref(u));
+    await deleteUser(u);
+  }catch(e){loaded=true;b.classList.remove('sure');b.textContent='Padam akaun saya';say(emsg(e))}
+};
 
 window.doChangePw=async function(){
   var m=$('acc-msg'),o=$('c-old').value,n=$('c-new').value,u=auth.currentUser;
@@ -352,7 +398,9 @@ window.vAccount=function(){
     '<div class="grid"><div><label for="c-old">Kata laluan lama</label><input id="c-old" type="password" autocomplete="current-password"></div>'+
     '<div><label for="c-new">Kata laluan baharu</label><input id="c-new" type="password" autocomplete="new-password"></div></div>'+
     '<button class="primary" onclick="doChangePw()">Tukar kata laluan</button><div id="acc-msg" class="msg" role="status"></div>'+
-    '<button class="ghost" style="margin-top:12px;width:100%" onclick="doLogout()">Log keluar</button></div>';
+    '<button class="ghost" style="margin-top:12px;width:100%" onclick="doLogout()">Log keluar</button></div>'+
+    '<h2>Padam akaun</h2><div class="panel"><div class="m" style="margin-bottom:10px">Akaun dan semua rekod anda akan dipadam kekal dan tidak boleh dipulihkan. Muat turun CSV dahulu jika perlu.</div><label for="x-pw">Kata laluan</label><input id="x-pw" type="password" autocomplete="current-password"><button class="ghost" style="margin-top:12px;width:100%" onclick="doDelete(this)">Padam akaun saya</button><div id="x-msg" class="msg" role="status"></div></div>'+
+    '<h2>Polisi Privasi</h2><div class="panel">'+policy()+'</div>';
 };
 
 window.cloudSave=function(S){
@@ -364,9 +412,9 @@ window.cloudSave=function(S){
   },400);
 };
 
-onAuthStateChanged(auth,function(u){
+window.enterApp=function(u){
   loaded=false;
-  if(!u){window.S={service:[],debt:[],spend:[],todo:[]};showAuth('login');return}
+  if(!u.emailVerified){showAuth('verify');return}
   showApp(false);$('auth').hidden=false;$('auth').innerHTML='<div class="empty">Memuatkan data...</div>';
   getDoc(dref(u)).then(function(s){
     var d=s.exists()?s.data():null,n={service:[],debt:[],spend:[],todo:[]};
@@ -376,6 +424,10 @@ onAuthStateChanged(auth,function(u){
     showApp(true);setWho();setSync('');render();
     if(!d)cloudSave(window.S);
   }).catch(function(){showAuth('error')});
+};
+onAuthStateChanged(auth,function(u){
+  if(!u){loaded=false;window.S={service:[],debt:[],spend:[],todo:[]};showAuth('login');return}
+  window.enterApp(u);
 });
 </script>
 </body>
