@@ -72,22 +72,28 @@ nav button{background:none;border:0;border-radius:0;min-height:54px;color:var(--
 nav button[aria-selected="true"]{color:var(--brand);border-top-color:var(--brand);font-weight:600}
 @media (prefers-color-scheme:dark){:root:not([data-theme="light"]) nav button[aria-selected="true"]{color:var(--ink)}}
 @media (max-width:420px){.stats{gap:6px}.stat{padding:8px}.stat b{font-size:14px}}
+.auth{max-width:420px;margin:0 auto;padding:40px 16px}
+[hidden]{display:none!important}
+.links{display:flex;flex-wrap:wrap;gap:4px 16px;margin-top:14px}
+.link{background:none;border:0;color:var(--accent);min-height:34px;padding:0;text-decoration:underline;font-size:13.5px}
+.msg{font-size:13px;margin-top:10px;min-height:1px}
+.err{color:var(--danger)}
 </style>
 </head>
 <body>
-<div class="wrap">
+<div id="auth" class="auth"><div class="empty">Memuatkan...</div></div>
+<div class="wrap" id="app" hidden>
   <header>
-    <h1>Buku Saya</h1>
+    <div class="row" style="align-items:center;margin-bottom:14px"><h1 style="margin:0">Buku Saya</h1><div class="m" style="text-align:right"><div id="who"></div><div id="sync"></div></div></div>
     <div class="stats" id="stats"></div>
   </header>
   <main id="main"></main>
 </div>
-<nav id="nav" role="tablist"></nav>
+<nav id="nav" role="tablist" hidden></nav>
 
 <script>
-var K='buku-saya-v1',S={service:[],debt:[],spend:[],todo:[]},tab='service';
-try{var raw=localStorage.getItem(K);if(raw){S=Object.assign(S,JSON.parse(raw))}}catch(e){}
-function save(){try{localStorage.setItem(K,JSON.stringify(S))}catch(e){}}
+var S={service:[],debt:[],spend:[],todo:[]},tab='service';
+function save(){if(window.cloudSave)window.cloudSave(S)}
 function uid(){return Date.now().toString(36)+Math.random().toString(36).slice(2,6)}
 function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]})}
 function rm(n){return 'RM '+(Number(n)||0).toLocaleString('en-MY',{minimumFractionDigits:2,maximumFractionDigits:2})}
@@ -210,7 +216,7 @@ function vTodo(){
 function addTodo(){var t=v('t-text');if(!t)return;S.todo.push({id:uid(),text:t,done:false});save();render();document.getElementById('t-text').focus()}
 function toggle(id){S.todo.forEach(function(t){if(t.id===id)t.done=!t.done});save();render()}
 
-function vBackup(){return '<h2>Sandaran data</h2><div class="panel"><div class="m" style="margin-bottom:8px">Salin data ke tempat selamat. Untuk pulihkan, tampal data sandaran di kotak ini.</div><textarea id="bk" aria-label="Data sandaran"></textarea><div class="grid" style="margin-top:10px"><button class="pay" onclick="bkCopy()">Salin data</button><button class="ghost" style="min-height:38px" onclick="bkRestore(this)">Pulihkan data</button></div><div class="m" id="bk-msg" style="margin-top:8px"></div></div>'}
+function vBackup(){return '<h2>Sandaran data</h2><div class="panel"><div class="m" style="margin-bottom:8px">Salin data ke tempat selamat. Untuk pulihkan, tampal data sandaran di kotak ini.</div><textarea id="bk" aria-label="Data sandaran"></textarea><div class="grid" style="margin-top:10px"><button class="pay" onclick="bkCopy()">Salin data</button><button class="ghost" style="min-height:38px" onclick="bkRestore(this)">Pulihkan data</button></div><button class="pay" style="width:100%;margin-top:10px" onclick="exportCsv()">Muat turun Excel (CSV): '+tabName()+'</button><div class="m" id="bk-msg" style="margin-top:8px"></div></div>'}
 function bkCopy(){var t=JSON.stringify(S),e=document.getElementById('bk'),m=document.getElementById('bk-msg');e.value=t;e.select();var fb=function(){m.textContent='Tekan lama pada kotak untuk salin data.'};try{navigator.clipboard.writeText(t).then(function(){m.textContent='Data disalin. Simpan di Nota atau hantar kepada diri sendiri.'},fb)}catch(x){fb()}}
 function bkRestore(b){
   if(!b.classList.contains('sure')){b.classList.add('sure');b.textContent='Pasti? Data semasa diganti';setTimeout(function(){if(b.isConnected){b.classList.remove('sure');b.textContent='Pulihkan data'}},4000);return}
@@ -219,11 +225,158 @@ function bkRestore(b){
 }
 function render(){
   var y=window.scrollY;
-  document.getElementById('main').innerHTML={service:vService,debt:vDebt,spend:vSpend,todo:vTodo}[tab]()+vBackup();
+  document.getElementById('main').innerHTML={service:vService,debt:vDebt,spend:vSpend,todo:vTodo}[tab]()+vBackup()+vAccount();
   nav();stats();window.scrollTo(0,y);
 }
-render();
 if('serviceWorker' in navigator){window.addEventListener('load',function(){navigator.serviceWorker.register('sw.js').catch(function(){})})}
+
+function tabName(){return {service:'Servis',debt:'Hutang',spend:'Belanja',todo:'Tugasan'}[tab]}
+function csvCell(x){x=String(x==null?'':x);if(/^[=+\-@\t\r]/.test(x))x="'"+x;return '"'+x.replace(/"/g,'""')+'"'}
+function exportCsv(){
+  var head,rows;
+  if(tab==='service'){head=['Tarikh','Km','Kerja','Kos (RM)','Nota','Servis seterusnya (km)'];rows=S.service.map(function(x){return [x.date,x.km,x.work,x.cost,x.note,x.next||'']})}
+  else if(tab==='debt'){head=['Nama','Jenis','Jumlah (RM)','Dibayar (RM)','Baki (RM)','Nota'];rows=S.debt.map(function(d){return [d.name,d.dir==='owe'?'Saya berhutang':'Orang hutang saya',d.amt,paid(d),bal(d),d.note]})}
+  else if(tab==='spend'){head=['Tarikh','Kategori','Jumlah (RM)','Nota'];rows=S.spend.map(function(x){return [x.date,x.cat,x.amt,x.note]})}
+  else{head=['Tugasan','Siap'];rows=S.todo.map(function(t){return [t.text,t.done?'Ya':'Tidak']})}
+  var csv='\ufeff'+[head].concat(rows).map(function(r){return r.map(csvCell).join(',')}).join('\r\n');
+  var a=document.createElement('a');a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv;charset=utf-8'}));
+  a.download='buku-saya-'+tab+'-'+today()+'.csv';document.body.appendChild(a);a.click();a.remove();
+}
+</script>
+<script type="module">
+import {initializeApp} from "https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js";
+import {getAuth,onAuthStateChanged,createUserWithEmailAndPassword,signInWithEmailAndPassword,signOut,sendPasswordResetEmail,updatePassword,reauthenticateWithCredential,EmailAuthProvider,updateProfile} from "https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js";
+import {getFirestore,doc,getDoc,setDoc} from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
+
+var app=initializeApp({
+  apiKey:"AIzaSyDOWpk9NAU90yZIiRJg5kCVVTMsU1YrZ-Q",
+  authDomain:"buku-saya-2c17d.firebaseapp.com",
+  projectId:"buku-saya-2c17d",
+  storageBucket:"buku-saya-2c17d.firebasestorage.app",
+  messagingSenderId:"978561023459",
+  appId:"1:978561023459:web:ce824acde86d74e334f4d6"
+});
+var auth=getAuth(app),db=getFirestore(app);
+var $=function(id){return document.getElementById(id)};
+var KEYS=['service','debt','spend','todo'];
+var loaded=false,timer=null;
+var ERR={
+  'auth/invalid-credential':'E-mel atau kata laluan salah.',
+  'auth/wrong-password':'E-mel atau kata laluan salah.',
+  'auth/user-not-found':'E-mel atau kata laluan salah.',
+  'auth/invalid-email':'Format e-mel tidak sah.',
+  'auth/email-already-in-use':'E-mel ini sudah didaftarkan. Cuba log masuk.',
+  'auth/weak-password':'Kata laluan terlalu lemah.',
+  'auth/too-many-requests':'Terlalu banyak percubaan. Cuba lagi sebentar.',
+  'auth/network-request-failed':'Tiada sambungan internet.',
+  'auth/requires-recent-login':'Sila log keluar dan log masuk semula, kemudian cuba lagi.'
+};
+function emsg(e){return ERR[e&&e.code]||'Sesuatu tidak kena. Cuba lagi.'}
+function dref(u){return doc(db,'users',u.uid,'data','main')}
+function showApp(on){$('auth').hidden=on;$('app').hidden=!on;$('nav').hidden=!on}
+function setSync(t,bad){var s=$('sync');if(s){s.textContent=t;s.style.color=bad?'var(--danger)':''}}
+function setWho(){var u=auth.currentUser;var w=$('who');if(w)w.textContent=u?(u.displayName||u.email):''}
+function note(t,ok){var m=$('a-msg');if(m){m.textContent=t||'';m.className='msg '+(ok?'pos':'err')}}
+function field(id,label,type,ac,enter){
+  return '<div style="margin-bottom:10px"><label for="'+id+'">'+label+'</label><input id="'+id+'" type="'+type+'" autocomplete="'+ac+'"'+(enter?' onkeydown="if(event.key===\'Enter\')'+enter+'"':'')+'></div>';
+}
+function back(){return '<button class="ghost" style="width:100%;margin-top:12px" onclick="showAuth(\'login\')">Kembali ke log masuk</button>'}
+
+window.showAuth=function(mode,msg,ok){
+  showApp(false);
+  var h='<h1 style="margin:0 0 4px">Buku Saya</h1><div class="m" style="margin-bottom:16px">Servis motosikal, hutang, belanja dan tugasan.</div><div class="panel">';
+  if(mode==='login'){
+    h+='<h2 style="margin-top:0">Log masuk</h2>'+field('a-email','E-mel','email','email')+field('a-pass','Kata laluan','password','current-password',"doAuth('login')")+
+      '<button class="primary" onclick="doAuth(\'login\')">Log masuk</button><div id="a-msg" class="msg" role="status"></div>'+
+      '<div class="links"><button class="link" onclick="showAuth(\'forgot\')">Lupa kata laluan</button><button class="link" onclick="showAuth(\'lupauser\')">Lupa username</button><button class="link" onclick="showAuth(\'lupaemel\')">Lupa e-mel</button></div>'+
+      '<button class="ghost" style="width:100%;margin-top:12px" onclick="showAuth(\'register\')">Daftar akaun baharu</button>';
+  }else if(mode==='register'){
+    h+='<h2 style="margin-top:0">Daftar akaun</h2>'+field('a-user','Username (3-20 huruf, nombor atau _)','text','username')+field('a-email','E-mel','email','email')+
+      field('a-pass','Kata laluan (sekurang-kurangnya 8 aksara)','password','new-password')+field('a-pass2','Ulang kata laluan','password','new-password',"doAuth('register')")+
+      '<button class="primary" onclick="doAuth(\'register\')">Daftar</button><div id="a-msg" class="msg" role="status"></div>'+back();
+  }else if(mode==='forgot'){
+    h+='<h2 style="margin-top:0">Lupa kata laluan</h2><div class="m" style="margin-bottom:10px">Masukkan e-mel akaun anda. Kami hantar pautan untuk tetapkan kata laluan baharu.</div>'+
+      field('a-email','E-mel','email','email',"doAuth('forgot')")+'<button class="primary" onclick="doAuth(\'forgot\')">Hantar pautan</button><div id="a-msg" class="msg" role="status"></div>'+back();
+  }else if(mode==='lupauser'){
+    h+='<h2 style="margin-top:0">Lupa username</h2><div class="m">Log masuk dengan e-mel dan kata laluan anda. Username dipaparkan di penjuru atas app dan dalam bahagian Akaun. Kalau kata laluan juga terlupa, guna Lupa kata laluan dahulu.</div>'+back();
+  }else if(mode==='lupaemel'){
+    h+='<h2 style="margin-top:0">Lupa e-mel</h2><div class="m">E-mel tidak boleh dicari semula daripada app ini. Cuba guna Lupa kata laluan dengan setiap e-mel yang biasa anda guna. Pautan hanya sampai jika e-mel itu berdaftar. Jika anda pemilik app, senarai e-mel ada di Firebase Console, bahagian Authentication.</div>'+back();
+  }else if(mode==='error'){
+    h+='<h2 style="margin-top:0">Data gagal dimuatkan</h2><div class="m">Semak sambungan internet. Data anda tidak diubah.</div><button class="primary" onclick="location.reload()">Cuba lagi</button><button class="ghost" style="width:100%;margin-top:12px" onclick="doLogout()">Log keluar</button>';
+  }
+  $('auth').innerHTML=h+'</div>';
+  if(msg)note(msg,ok);
+};
+
+window.doAuth=async function(mode){
+  var em=v('a-email'),pw=($('a-pass')||{}).value||'';
+  try{
+    if(mode==='login'){
+      if(!em||!pw){note('Isi e-mel dan kata laluan.');return}
+      note('Sedang log masuk...',true);
+      await signInWithEmailAndPassword(auth,em,pw);
+    }else if(mode==='register'){
+      var un=v('a-user');
+      if(!/^[A-Za-z0-9_]{3,20}$/.test(un)){note('Username mesti 3 hingga 20 aksara: huruf, nombor atau _.');return}
+      if(!em){note('Isi e-mel.');return}
+      if(pw.length<8){note('Kata laluan mesti sekurang-kurangnya 8 aksara.');return}
+      if(pw!==$('a-pass2').value){note('Kata laluan tidak sama.');return}
+      note('Sedang mendaftar...',true);
+      var c=await createUserWithEmailAndPassword(auth,em,pw);
+      await updateProfile(c.user,{displayName:un});setWho();
+    }else if(mode==='forgot'){
+      if(!em){note('Isi e-mel.');return}
+      try{await sendPasswordResetEmail(auth,em)}catch(e){if(e.code!=='auth/user-not-found')throw e}
+      note('Jika e-mel itu berdaftar, pautan tetapan semula telah dihantar. Semak juga folder spam.',true);
+    }
+  }catch(e){note(emsg(e))}
+};
+
+window.doLogout=function(){signOut(auth).catch(function(){})};
+
+window.doChangePw=async function(){
+  var m=$('acc-msg'),o=$('c-old').value,n=$('c-new').value,u=auth.currentUser;
+  function say(t,ok){m.textContent=t;m.className='msg '+(ok?'pos':'err')}
+  if(!o||!n){say('Isi kedua-dua kata laluan.');return}
+  if(n.length<8){say('Kata laluan baharu mesti sekurang-kurangnya 8 aksara.');return}
+  try{
+    await reauthenticateWithCredential(u,EmailAuthProvider.credential(u.email,o));
+    await updatePassword(u,n);
+    $('c-old').value='';$('c-new').value='';say('Kata laluan berjaya ditukar.',true);
+  }catch(e){say(emsg(e))}
+};
+
+window.vAccount=function(){
+  var u=auth.currentUser;
+  return '<h2>Akaun</h2><div class="panel"><div class="m" style="margin-bottom:10px">Username: <b>'+esc(u.displayName||'-')+'</b><br>E-mel: '+esc(u.email)+'</div>'+
+    '<div class="grid"><div><label for="c-old">Kata laluan lama</label><input id="c-old" type="password" autocomplete="current-password"></div>'+
+    '<div><label for="c-new">Kata laluan baharu</label><input id="c-new" type="password" autocomplete="new-password"></div></div>'+
+    '<button class="primary" onclick="doChangePw()">Tukar kata laluan</button><div id="acc-msg" class="msg" role="status"></div>'+
+    '<button class="ghost" style="margin-top:12px;width:100%" onclick="doLogout()">Log keluar</button></div>';
+};
+
+window.cloudSave=function(S){
+  var u=auth.currentUser;if(!u||!loaded)return;
+  clearTimeout(timer);setSync('Menyimpan...');
+  timer=setTimeout(function(){
+    var d={updated:Date.now()};KEYS.forEach(function(k){d[k]=S[k]});
+    setDoc(dref(u),d).then(function(){setSync('Disimpan')},function(){setSync('Gagal simpan. Semak internet.',true)});
+  },400);
+};
+
+onAuthStateChanged(auth,function(u){
+  loaded=false;
+  if(!u){window.S={service:[],debt:[],spend:[],todo:[]};showAuth('login');return}
+  showApp(false);$('auth').hidden=false;$('auth').innerHTML='<div class="empty">Memuatkan data...</div>';
+  getDoc(dref(u)).then(function(s){
+    var d=s.exists()?s.data():null,n={service:[],debt:[],spend:[],todo:[]};
+    if(d){KEYS.forEach(function(k){if(Array.isArray(d[k]))n[k]=d[k]})}
+    else{try{var raw=localStorage.getItem('buku-saya-v1');if(raw){var o=JSON.parse(raw);KEYS.forEach(function(k){if(Array.isArray(o[k]))n[k]=o[k]})}}catch(e){}}
+    window.S=n;window.tab='service';loaded=true;
+    showApp(true);setWho();setSync('');render();
+    if(!d)cloudSave(window.S);
+  }).catch(function(){showAuth('error')});
+});
 </script>
 </body>
 </html>
