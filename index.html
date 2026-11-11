@@ -78,6 +78,11 @@ nav button[aria-selected="true"]{color:var(--brand);border-top-color:var(--brand
 .link{background:none;border:0;color:var(--accent);min-height:34px;padding:0;text-decoration:underline;font-size:13.5px}
 .msg{font-size:13px;margin-top:10px;min-height:1px}
 .err{color:var(--danger)}
+.warn{color:#B45309}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]) .warn{color:#F2B15C}}
+:root[data-theme="dark"] .warn{color:#F2B15C}
+.alert{background:var(--surface);border:1px solid var(--line);border-left:4px solid var(--danger);border-radius:10px;padding:10px 12px;margin:10px 0;font-size:14px}
+.alert div{margin-top:2px}
 </style>
 </head>
 <body>
@@ -92,7 +97,7 @@ nav button[aria-selected="true"]{color:var(--brand);border-top-color:var(--brand
 <nav id="nav" role="tablist" hidden></nav>
 
 <script>
-var S={service:[],debt:[],spend:[],todo:[]},tab='service';
+var S={service:[],debt:[],spend:[],todo:[],motors:[]},tab='service';
 function save(){if(window.cloudSave)window.cloudSave(S)}
 function uid(){return Date.now().toString(36)+Math.random().toString(36).slice(2,6)}
 function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]})}
@@ -132,33 +137,106 @@ function del(type,id,b){
 }
 function empty(t){return '<div class="empty">'+t+'</div>'}
 
+var curMotor='',editingMotor='';
+function daysTo(d){return Math.round((new Date(d+'T00:00:00')-new Date(today()+'T00:00:00'))/864e5)}
+function motorName(id){var m=S.motors.filter(function(x){return x.id===id})[0];return m?m.name:'-'}
+function norm(){
+  var ch=false;
+  if(!Array.isArray(S.motors)){S.motors=[];ch=true}
+  if(S.service.some(function(x){return !x.motor})&&!S.motors.length){S.motors.push({id:uid(),name:'Motosikal saya',plate:''});ch=true}
+  S.service.forEach(function(x){if(!x.motor){x.motor=S.motors[0].id;ch=true}});
+  if(!S.motors.some(function(m){return m.id===curMotor}))curMotor=S.motors[0]?S.motors[0].id:'';
+  return ch;
+}
+function svStatus(m){
+  var l=S.service.filter(function(x){return x.motor===m.id}).sort(function(a,b){return b.date.localeCompare(a.date)});
+  var mk=Math.max.apply(null,[0].concat(l.map(function(x){return x.km||0})));
+  var rk=l.filter(function(x){return x.next})[0],rd=l.filter(function(x){return x.nextDate})[0];
+  var r={m:m,mk:mk,nextKm:rk?rk.next:null,nextDate:rd?rd.nextDate:null,left:null,days:null,level:'none'};
+  if(rk)r.left=rk.next-mk;
+  if(rd)r.days=daysTo(rd.nextDate);
+  if(rk||rd){
+    if((r.left!==null&&r.left<=0)||(r.days!==null&&r.days<=0))r.level='over';
+    else if((r.left!==null&&r.left<=500)||(r.days!==null&&r.days<=14))r.level='soon';
+    else r.level='ok';
+  }
+  return r;
+}
+function svText(r){
+  var p=[];
+  if(r.left!==null)p.push(r.left>0?'baki '+r.left.toLocaleString('en-MY')+' km':'sudah melepasi '+r.nextKm.toLocaleString('en-MY')+' km');
+  if(r.days!==null)p.push(r.days>0?r.days+' hari lagi':(r.days===0?'servis hari ini':'lewat '+(-r.days)+' hari'));
+  return p.join(', ');
+}
+function alertBar(){
+  var r=S.motors.map(svStatus).filter(function(x){return x.level==='over'||x.level==='soon'});
+  if(!r.length)return '';
+  return '<div class="alert"><b>Peringatan servis</b>'+r.map(function(x){return '<div class="'+(x.level==='over'?'neg':'warn')+'">'+esc(x.m.name)+': '+svText(x)+'</div>'}).join('')+'</div>';
+}
+function motorForm(){
+  return '<div class="grid" style="margin-top:12px"><div><label for="mo-name">Nama motosikal</label><input id="mo-name" placeholder="Yamaha LC135"></div><div><label for="mo-plate">No. pendaftaran</label><input id="mo-plate" placeholder="ABC 1234"></div></div><button class="primary" onclick="addMotor()">Simpan motosikal</button>';
+}
+function pickMotor(id){curMotor=id;editingMotor='';render()}
+function toggleMotorForm(edit){
+  var m=S.motors.filter(function(x){return x.id===curMotor})[0];
+  editingMotor=edit&&m?m.id:'';
+  document.getElementById('mo-name').value=editingMotor?m.name:'';
+  document.getElementById('mo-plate').value=editingMotor?m.plate:'';
+  document.getElementById('mo-form').hidden=false;document.getElementById('mo-name').focus();
+}
+function addMotor(){
+  var n=v('mo-name');if(!n){document.getElementById('mo-name').focus();return}
+  var pl=v('mo-plate').toUpperCase();
+  if(editingMotor){S.motors.forEach(function(x){if(x.id===editingMotor){x.name=n;x.plate=pl}})}
+  else{var id=uid();S.motors.push({id:id,name:n,plate:pl});curMotor=id}
+  editingMotor='';save();render();
+}
+function delMotor(b){
+  if(!b.classList.contains('sure')){b.classList.add('sure');b.textContent='Pasti? Rekod servisnya turut dipadam';
+    setTimeout(function(){if(b.isConnected){b.classList.remove('sure');b.textContent='Padam motosikal ini'}},4000);return}
+  var id=curMotor;
+  S.motors=S.motors.filter(function(x){return x.id!==id});
+  S.service=S.service.filter(function(x){return x.motor!==id});
+  save();render();
+}
 function vService(){
-  var l=S.service.slice().sort(function(a,b){return b.date.localeCompare(a.date)});
+  if(!S.motors.length)return '<h2>Tambah motosikal pertama</h2><div class="panel">'+motorForm()+'</div>';
+  var m=S.motors.filter(function(x){return x.id===curMotor})[0]||S.motors[0];
+  var l=S.service.filter(function(x){return x.motor===m.id}).sort(function(a,b){return b.date.localeCompare(a.date)});
   var yr=today().slice(0,4);
-  var cost=S.service.filter(function(x){return x.date.slice(0,4)===yr}).reduce(function(a,x){return a+x.cost},0);
-  var last=l[0];
-  var h='<h2>Rekod servis baharu</h2><div class="panel"><div class="grid">'+
+  var cost=l.filter(function(x){return x.date.slice(0,4)===yr}).reduce(function(a,x){return a+x.cost},0);
+  var st=svStatus(m),last=l[0];
+  var h='<h2>Motosikal</h2><div class="panel"><label for="mo-sel">Pilih motosikal</label><select id="mo-sel" onchange="pickMotor(this.value)">'+
+   S.motors.map(function(x){return '<option value="'+x.id+'"'+(x.id===m.id?' selected':'')+'>'+esc(x.name)+(x.plate?' ('+esc(x.plate)+')':'')+'</option>'}).join('')+'</select>'+
+   '<div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap"><button class="ghost" onclick="toggleMotorForm(false)">Tambah motosikal</button><button class="ghost" onclick="toggleMotorForm(true)">Ubah nama</button><button class="ghost" onclick="delMotor(this)">Padam motosikal ini</button></div>'+
+   '<div id="mo-form" hidden>'+motorForm()+'</div></div>';
+  h+='<h2>Status servis</h2><div class="item">';
+  if(st.level==='none')h+='<div class="m">Belum ada tarikh atau km servis seterusnya. Isi semasa merekod servis.</div>';
+  else h+='<div class="t '+(st.level==='over'?'neg':(st.level==='soon'?'warn':'pos'))+'">'+(st.level==='over'?'Sudah tiba masa servis':(st.level==='soon'?'Servis hampir tiba':'Servis dalam keadaan baik'))+'</div><div class="m">'+svText(st)+(st.mk?'. Bacaan terakhir '+st.mk.toLocaleString('en-MY')+' km.':'.')+'</div>';
+  h+='</div>';
+  h+='<h2>Rekod servis baharu</h2><div class="panel"><div class="grid">'+
    '<div><label for="sv-date">Tarikh</label><input id="sv-date" type="date" value="'+today()+'"></div>'+
    '<div><label for="sv-km">Bacaan odometer (km)</label><input id="sv-km" type="number" inputmode="numeric" placeholder="12500"></div>'+
    '<div class="full"><label for="sv-work">Kerja servis</label><input id="sv-work" placeholder="Tukar minyak enjin, pad brek"></div>'+
    '<div><label for="sv-cost">Kos (RM)</label><input id="sv-cost" type="number" inputmode="decimal" placeholder="0.00"></div>'+
-   '<div><label for="sv-note">Nota / kedai</label><input id="sv-note" placeholder="Bengkel Ali"></div>'+
-   '<div class="full"><label for="sv-next">Servis seterusnya pada (km, pilihan)</label><input id="sv-next" type="number" inputmode="numeric" placeholder="15000"></div>'+
+   '<div><label for="sv-resit">No. resit</label><input id="sv-resit" placeholder="INV-0123"></div>'+
+   '<div class="full"><label for="sv-note">Nota / kedai</label><input id="sv-note" placeholder="Bengkel Ali"></div>'+
+   '<div><label for="sv-next">Servis seterusnya (km)</label><input id="sv-next" type="number" inputmode="numeric" placeholder="15000"></div>'+
+   '<div><label for="sv-nextdate">Servis seterusnya (tarikh)</label><input id="sv-nextdate" type="date"></div>'+
    '</div><button class="primary" onclick="addService()">Simpan servis</button></div>';
-  var nx=l.filter(function(x){return x.next})[0],mk=Math.max.apply(null,[0].concat(S.service.map(function(x){return x.km||0})));
-  if(nx){var left=nx.next-mk;h+='<h2>Peringatan servis</h2><div class="item"><div class="t '+(left<=0?'neg':'')+'">Servis seterusnya pada '+Number(nx.next).toLocaleString('en-MY')+' km</div><div class="m">'+(left>0?'Baki '+left.toLocaleString('en-MY')+' km daripada bacaan terakhir ('+mk.toLocaleString('en-MY')+' km).':'Sudah sampai masanya untuk servis.')+'</div></div>'}
   h+='<h2>Sejarah servis</h2>';
   if(last)h+='<div class="m">Terakhir: '+fd(last.date)+(last.km?' pada '+Number(last.km).toLocaleString('en-MY')+' km':'')+'. Kos servis tahun ini: '+rm(cost)+'.</div>';
   h+='<div class="list">'+(l.length?l.map(function(x){
-    return '<div class="item"><div class="row"><div><div class="t">'+esc(x.work)+'</div><div class="m">'+fd(x.date)+(x.km?' · '+Number(x.km).toLocaleString('en-MY')+' km':'')+'</div></div><div class="amt">'+rm(x.cost)+'</div></div>'+
-      (x.note?'<div class="m" style="margin-top:4px">'+esc(x.note)+'</div>':'')+'<div style="margin-top:8px">'+delBtn('service',x.id)+'</div></div>'}).join(''):empty('Belum ada rekod servis. Tambah servis pertama anda di atas.'))+'</div>';
+    return '<div class="item"><div class="row"><div><div class="t">'+esc(x.work)+'</div><div class="m">'+fd(x.date)+(x.km?' · '+Number(x.km).toLocaleString('en-MY')+' km':'')+(x.resit?' · Resit '+esc(x.resit):'')+'</div></div><div class="amt">'+rm(x.cost)+'</div></div>'+
+      (x.note?'<div class="m" style="margin-top:4px">'+esc(x.note)+'</div>':'')+
+      ((x.next||x.nextDate)?'<div class="m" style="margin-top:4px">Seterusnya: '+(x.next?Number(x.next).toLocaleString('en-MY')+' km':'')+(x.next&&x.nextDate?' atau ':'')+(x.nextDate?fd(x.nextDate):'')+'</div>':'')+
+      '<div style="margin-top:8px">'+delBtn('service',x.id)+'</div></div>'}).join(''):empty('Belum ada rekod servis untuk motosikal ini.'))+'</div>';
   return h;
 }
 function addService(){
   var w=v('sv-work');if(!w){document.getElementById('sv-work').focus();return}
-  S.service.push({id:uid(),date:v('sv-date')||today(),km:num('sv-km'),work:w,cost:num('sv-cost'),note:v('sv-note'),next:num('sv-next')});save();render();
+  S.service.push({id:uid(),motor:curMotor,date:v('sv-date')||today(),km:num('sv-km'),work:w,cost:num('sv-cost'),note:v('sv-note'),resit:v('sv-resit'),next:num('sv-next'),nextDate:v('sv-nextdate')});save();render();
 }
-
 function vDebt(){
   var h='<h2>Hutang baharu</h2><div class="panel"><div class="grid">'+
    '<div><label for="d-name">Nama</label><input id="d-name" placeholder="Nama orang / bank"></div>'+
@@ -220,12 +298,12 @@ function vBackup(){return '<h2>Sandaran data</h2><div class="panel"><div class="
 function bkCopy(){var t=JSON.stringify(S),e=document.getElementById('bk'),m=document.getElementById('bk-msg');e.value=t;e.select();var fb=function(){m.textContent='Tekan lama pada kotak untuk salin data.'};try{navigator.clipboard.writeText(t).then(function(){m.textContent='Data disalin. Simpan di Nota atau hantar kepada diri sendiri.'},fb)}catch(x){fb()}}
 function bkRestore(b){
   if(!b.classList.contains('sure')){b.classList.add('sure');b.textContent='Pasti? Data semasa diganti';setTimeout(function(){if(b.isConnected){b.classList.remove('sure');b.textContent='Pulihkan data'}},4000);return}
-  try{var o=JSON.parse(v('bk'));if(!o||!Array.isArray(o.service)||!Array.isArray(o.debt)||!Array.isArray(o.spend)||!Array.isArray(o.todo))throw 0;S=o;save();render()}
+  try{var o=JSON.parse(v('bk'));if(!o||!Array.isArray(o.service)||!Array.isArray(o.debt)||!Array.isArray(o.spend)||!Array.isArray(o.todo))throw 0;S=o;norm();save();render()}
   catch(e){document.getElementById('bk-msg').textContent='Data tidak sah. Tampal data sandaran yang lengkap.';b.classList.remove('sure');b.textContent='Pulihkan data'}
 }
 function render(){
-  var y=window.scrollY;
-  document.getElementById('main').innerHTML={service:vService,debt:vDebt,spend:vSpend,todo:vTodo}[tab]()+vBackup()+vAccount();
+  var y=window.scrollY;norm();
+  document.getElementById('main').innerHTML=alertBar()+{service:vService,debt:vDebt,spend:vSpend,todo:vTodo}[tab]()+vBackup()+vAccount();
   nav();stats();window.scrollTo(0,y);
 }
 if('serviceWorker' in navigator){window.addEventListener('load',function(){navigator.serviceWorker.register('sw.js').catch(function(){})})}
@@ -234,7 +312,7 @@ function tabName(){return {service:'Servis',debt:'Hutang',spend:'Belanja',todo:'
 function csvCell(x){x=String(x==null?'':x);if(/^[=+\-@\t\r]/.test(x))x="'"+x;return '"'+x.replace(/"/g,'""')+'"'}
 function exportCsv(){
   var head,rows;
-  if(tab==='service'){head=['Tarikh','Km','Kerja','Kos (RM)','Nota','Servis seterusnya (km)'];rows=S.service.map(function(x){return [x.date,x.km,x.work,x.cost,x.note,x.next||'']})}
+  if(tab==='service'){head=['Motosikal','Tarikh','Km','Kerja','Kos (RM)','No. resit','Nota','Servis seterusnya (km)','Servis seterusnya (tarikh)'];rows=S.service.map(function(x){return [motorName(x.motor),x.date,x.km,x.work,x.cost,x.resit||'',x.note,x.next||'',x.nextDate||'']})}
   else if(tab==='debt'){head=['Nama','Jenis','Jumlah (RM)','Dibayar (RM)','Baki (RM)','Nota'];rows=S.debt.map(function(d){return [d.name,d.dir==='owe'?'Saya berhutang':'Orang hutang saya',d.amt,paid(d),bal(d),d.note]})}
   else if(tab==='spend'){head=['Tarikh','Kategori','Jumlah (RM)','Nota'];rows=S.spend.map(function(x){return [x.date,x.cat,x.amt,x.note]})}
   else{head=['Tugasan','Siap'];rows=S.todo.map(function(t){return [t.text,t.done?'Ya':'Tidak']})}
@@ -258,7 +336,7 @@ var app=initializeApp({
 });
 var auth=getAuth(app),db=getFirestore(app);
 var $=function(id){return document.getElementById(id)};
-var KEYS=['service','debt','spend','todo'];
+var KEYS=['service','debt','spend','todo','motors'];
 var loaded=false,timer=null;
 var ERR={
   'auth/invalid-credential':'E-mel atau kata laluan salah.',
@@ -347,7 +425,7 @@ function policy(){
   return '<div class="m" style="line-height:1.65">'+
   '<p style="margin-top:0"><b>Data yang dikumpul.</b> Username, e-mel, kata laluan, serta rekod servis, hutang, belanja dan tugasan yang anda masukkan.</p>'+
   '<p><b>Tujuan.</b> Data digunakan hanya untuk menjalankan app ini: log masuk dan menyimpan rekod anda.</p>'+
-  '<p><b>Penyimpanan.</b> Data disimpan oleh Google Firebase di pelayar Singapura. Kata laluan disimpan dalam bentuk hash oleh Firebase Authentication, dan tidak boleh dibaca oleh sesiapa.</p>'+
+  '<p><b>Penyimpanan.</b> Data disimpan oleh Google Firebase di pelayan Singapura. Kata laluan disimpan dalam bentuk hash oleh Firebase Authentication, dan tidak boleh dibaca oleh sesiapa.</p>'+
   '<p><b>Akses.</b> Anda sahaja boleh membaca rekod anda melalui app. Pemilik app mempunyai akses teknikal ke pangkalan data dan hanya menggunakannya untuk penyelenggaraan dan sokongan.</p>'+
   '<p><b>Perkongsian.</b> Data anda tidak dijual dan tidak dikongsi dengan pihak lain, selain Google sebagai penyedia perkhidmatan penyimpanan.</p>'+
   '<p><b>Pemadaman.</b> Anda boleh memadam akaun dalam bahagian Akaun. Akaun dan semua rekod anda akan dipadam kekal.</p>'+
@@ -417,16 +495,16 @@ window.enterApp=function(u){
   if(!u.emailVerified){showAuth('verify');return}
   showApp(false);$('auth').hidden=false;$('auth').innerHTML='<div class="empty">Memuatkan data...</div>';
   getDoc(dref(u)).then(function(s){
-    var d=s.exists()?s.data():null,n={service:[],debt:[],spend:[],todo:[]};
+    var d=s.exists()?s.data():null,n={service:[],debt:[],spend:[],todo:[],motors:[]};
     if(d){KEYS.forEach(function(k){if(Array.isArray(d[k]))n[k]=d[k]})}
     else{try{var raw=localStorage.getItem('buku-saya-v1');if(raw){var o=JSON.parse(raw);KEYS.forEach(function(k){if(Array.isArray(o[k]))n[k]=o[k]})}}catch(e){}}
-    window.S=n;window.tab='service';loaded=true;
+    window.S=n;window.tab='service';loaded=true;var chg=norm();
     showApp(true);setWho();setSync('');render();
-    if(!d)cloudSave(window.S);
+    if(!d||chg)cloudSave(window.S);
   }).catch(function(){showAuth('error')});
 };
 onAuthStateChanged(auth,function(u){
-  if(!u){loaded=false;window.S={service:[],debt:[],spend:[],todo:[]};showAuth('login');return}
+  if(!u){loaded=false;window.S={service:[],debt:[],spend:[],todo:[],motors:[]};showAuth('login');return}
   window.enterApp(u);
 });
 </script>
